@@ -34,10 +34,29 @@ function defaultResolveImage (url) {
   return img;
 }
 
-function Slide2d (context2d, resolveImage) {
+function defaultResolveVideo (url) {
+  if (url in this._vids) {
+    return this._vids[url];
+  }
+  var vid = document.createElement("video");
+  document.body.appendChild(vid);
+  var src = document.createElement("source");
+  vid.appendChild(src);
+  vid.style.display = "none";
+  vid.src = url;
+  vid.crossOrigin = "anonymous";
+  vid.autoplay = true;
+  vid.loop = true;
+  this._vids[url] = vid;
+  vid.addEventListener("play", this.flush.bind(this));
+  return vid;
+}
+
+function Slide2d (context2d, resolveImage, resolveVideo) {
   if (!(this instanceof Slide2d))
     return new Slide2d(context2d, resolveImage);
   this.ctx = context2d;
+
   this._imgs = {};
   this.resolveImage = resolveImage ? function (src) {
     var res = resolveImage(src);
@@ -45,15 +64,25 @@ function Slide2d (context2d, resolveImage) {
       return defaultResolveImage.call(this, res);
     return res;
   } : defaultResolveImage;
+
+  this._vids = {};
+  this.resolveVideo = resolveVideo ? function (src) {
+    var res = resolveVideo(src);
+    if (typeof res === "string")
+      return defaultResolveVideo.call(this, res);
+    return res;
+  } : defaultResolveVideo;
 }
 
 Slide2d.defaultResolveImage = defaultResolveImage;
+Slide2d.defaultResolveVideo = defaultResolveVideo;
 Slide2d.defaults = defaults;
 
 Slide2d.prototype = {
   destroy: function () {
     this._item = null;
     this._imgs = null;
+    this._vids = null;
     this.ctx = null;
   },
 
@@ -92,6 +121,17 @@ Slide2d.prototype = {
     ctx.scale(rect[2] / w, rect[3] / h);
     this._renderRec(item.draws || defaults.draws, [], visitor || function(){});
     ctx.restore();
+
+    if (Object.keys(this._vids).length && !this._playing) {
+      this._playing = true;
+
+      var _this = this;
+      (function loop() {
+        _this.flush();
+
+        setTimeout(loop, 1000 / 30);
+      })();
+    }
   },
 
   _renderRec: function (draws, path, visitor) {
@@ -132,6 +172,13 @@ Slide2d.prototype = {
     case "drawImage":
       var img = typeof args[0] === "string" ? this.resolveImage(args[0]) : img;
       drawImage.apply(null, [ ctx, img ].concat(args.slice(1)));
+      break;
+
+    case "drawVideo":
+      var vid = typeof args[0] === "string" ? this.resolveVideo(args[0]) : vid;
+      if (!vid.paused && !vid.ended) {
+        ctx.drawImage.apply(ctx, [vid].concat(args.slice(1)));
+      }
       break;
 
     case "fillText":
